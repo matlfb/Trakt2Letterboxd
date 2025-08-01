@@ -45,13 +45,12 @@ On the **first run**, the script will:
 2. Display an 8-digit code to enter there  
 3. Save your authentication tokens into a file named `t_token`
 
-Once authenticated, the script will create a file named:
+Once authenticated, the script will create **two** CSV files:
 
-```
-trakt_movies_export.csv
-```
+- `trakt-exported-history.csv` — your watched history, to be imported via [Letterboxd Import](https://letterboxd.com/import/)  
+- `trakt-exported-watchlist.csv` — your watchlist, to be imported via [Letterboxd Watchlist](https://letterboxd.com/watchlist/)
 
-You can import this file directly into [Letterboxd](https://letterboxd.com/import/).
+You can import these files directly on Letterboxd.
 
 ---
 
