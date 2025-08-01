@@ -1,25 +1,75 @@
-# Trakt2Letterboxd
- 
-This little Python tool can convert Trakt movie backups (at least, those from [this site](https://darekkay.com/blog/trakt-tv-backup/)) into a format that Letterboxd is happy with. 
+# 🎬 Trakt2Letterboxd
 
-The Letterboxd import page can be found [here](https://letterboxd.com/import/).
+Python script to export your **Trakt** watched movies or lists (like your watchlist) into a **CSV** compatible with **Letterboxd**.
 
-Some sample files can be found at [this path](https://github.com/Jordy3D/Trakt2Letterboxd/tree/main/Examples) showing an actual backup file, as well as the final .csv output ready for Letterboxd.
+✅ Now supports **refresh tokens** – no more daily logins!
 
-## Requirements
-`python3`
-`pandas`
+---
 
-## Usage
-Drop a valid backup file from the above link (only known-working ones being watched_movies.txt and watched_shows.txt) onto Trakt2Letterboxd.py
+## 🔧 Setup
 
-## [There is a WIP webtool available here](https://jordy3d.github.io/projects/trakt2letterboxd).
-It likely won't change much, but it works.
+### 1. Install requirements
 
-## A few notes: 
-It may not work well for TV shows.
-This is because TV shows are far from Letterboxd's focus. An early version of this tool would fail spectacularly every time it tried to do TV things, but now it's at least somewhat capable. Mileage may vary.
+Make sure you have Python 3.7+ installed, then run:
 
-The Trakt backup doesn't seem to list the first time a movie was watched, just the most recent. If you don't rewatch things often, this shouldn't be an issue, but it's something to consider if the Watch Dates being accurate is something you care about.
+```bash
+pip install -r requirements.txt
+```
 
-If someone is willing to use this work to make it some webtool, they're more than free to do so. Just let me know in a GitHub issue or something and I'll link to it here.  
+### 2. Configure the script
+
+Edit the file `Trakt2Letterboxd.py` and replace the values at the top:
+
+```python
+CLIENT_ID = "your-trakt-client-id"
+CLIENT_SECRET = "your-trakt-client-secret"
+```
+
+You can get your credentials at:
+
+🔗 https://trakt.tv/oauth/applications
+
+---
+
+## 🚀 Usage
+
+Run the script:
+
+```bash
+python Trakt2Letterboxd.py
+```
+
+On the **first run**, the script will:
+
+1. Prompt you to visit [https://trakt.tv/activate](https://trakt.tv/activate)  
+2. Display an 8-digit code to enter there  
+3. Save your authentication tokens into a file named `t_token`
+
+Once authenticated, the script will create a file named:
+
+```
+trakt_movies_export.csv
+```
+
+You can import this file directly into [Letterboxd](https://letterboxd.com/import/).
+
+---
+
+## 🔁 Token Management
+
+- Trakt access tokens expire every **24 hours**  
+- This script uses your **refresh token** to renew automatically  
+- As long as you run the script **at least once every 90 days**, you won’t need to log in again  
+
+---
+
+## ⚠️ Warning
+
+Never commit or share your `CLIENT_ID`, `CLIENT_SECRET`, or `t_token` file publicly.
+
+---
+
+## 🙏 Credits
+
+- Forked from: [Jordy3D/Trakt2Letterboxd](https://github.com/Jordy3D/Trakt2Letterboxd)  
+- Modified and updated by: [@matlfb](https://github.com/matlfb)
