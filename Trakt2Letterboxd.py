@@ -140,6 +140,67 @@ class TraktImporter:
                     return False
         return False
 
+    def get_comments(self):
+        """Récupère tous les commentaires (reviews) de l'utilisateur"""
+        print("Getting comments/reviews...")
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + self.api_token,
+            'trakt-api-version': '2',
+            'trakt-api-key': self.api_clid
+        }
+        
+        comments_dict = {}
+        page = 1
+        
+        while True:
+            request = Request(
+                self.api_root + f'/users/me/comments/movies?page={page}&limit=100',
+                headers=headers
+            )
+            try:
+                response = urlopen(request)
+                response_body = response.read()
+                comments = json.loads(response_body)
+                
+                if not comments:
+                    break
+                
+                for item in comments:
+                    # item contient 'type', 'movie', et 'comment'
+                    # mais 'comment' est lui-même un objet avec un champ 'comment' à l'intérieur !
+                    if 'movie' in item and 'comment' in item:
+                        movie_ids = item['movie']['ids']
+                        
+                        # Si 'comment' est un dict, on prend le champ 'comment' dedans
+                        if isinstance(item['comment'], dict):
+                            comment_text = item['comment'].get('comment', '')
+                            spoiler = item['comment'].get('spoiler', False)
+                        else:
+                            # Si c'est déjà une string
+                            comment_text = item['comment']
+                            spoiler = item.get('spoiler', False)
+                        
+                        if spoiler:
+                            comment_text = "[SPOILER] " + comment_text
+                        
+                        # Utiliser tmdb comme clé principale
+                        key = movie_ids.get('tmdb')
+                        if key:
+                            comments_dict[key] = comment_text
+                
+                print(f"Completed comments page {page}")
+                page += 1
+                
+            except HTTPError as err:
+                if err.code == 404:
+                    break
+                print(f"{err.code} error while fetching comments.")
+                break
+        
+        print(f"Found {len(comments_dict)} comments/reviews")
+        return comments_dict
+
     def get_movie_list(self, list_name):
         print(f"Getting {list_name}")
         headers = {
@@ -151,6 +212,7 @@ class TraktImporter:
         extracted_movies = []
         page = 1
         ratings = self.get_ratings()
+        comments = self.get_comments()
 
         while True:
             request = Request(self.api_root + f'/sync/{list_name}/movies?page={page}&limit=100', headers=headers)
@@ -160,7 +222,7 @@ class TraktImporter:
                 movies = json.loads(response_body)
                 if not movies:
                     break
-                extracted_movies.extend(self.__extract_fields(movies, ratings))
+                extracted_movies.extend(self.__extract_fields(movies, ratings, comments))
                 print(f"Completed page {page}")
                 page += 1
             except HTTPError as err:
@@ -203,14 +265,23 @@ class TraktImporter:
         return ''
 
     @staticmethod
-    def __extract_fields(movies, ratings):
+    def __get_comment(comments_dict, ids):
+        """Récupère le commentaire associé à un film"""
+        tmdb_id = ids.get('tmdb')
+        if tmdb_id and tmdb_id in comments_dict:
+            return comments_dict[tmdb_id]
+        return ''
+
+    @staticmethod
+    def __extract_fields(movies, ratings, comments):
         return [{
             'WatchedDate': x['watched_at'] if 'watched_at' in x else '',
             'tmdbID': x['movie']['ids']['tmdb'],
             'imdbID': x['movie']['ids']['imdb'],
             'Title': x['movie']['title'],
             'Year': x['movie']['year'],
-            'Rating10': TraktImporter.__get_rating(ratings, x['movie']['ids'])
+            'Rating10': TraktImporter.__get_rating(ratings, x['movie']['ids']),
+            'Review': TraktImporter.__get_comment(comments, x['movie']['ids'])
         } for x in movies]
 
 def write_csv(history, filename):
