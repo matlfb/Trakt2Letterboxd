@@ -3,104 +3,118 @@ import csv
 import json
 import time
 from urllib.request import Request, urlopen
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
+
+# Use the directory where this script is located
+BASE_PATH = os.path.dirname(os.path.abspath(__file__))
 
 class TraktImporter:
     """ Trakt Importer """
 
     def __init__(self):
-        # === CONFIGURATION UTILISATEUR ===
         self.api_root = 'https://api.trakt.tv'
-        self.api_clid = 'YOUR_CLIENT_ID_HERE'        # <-- Remplace par ton client_id
-        self.api_clsc = 'YOUR_CLIENT_SECRET_HERE'    # <-- Remplace par ton client_secret
-        
-        # Dossier où seront stockés tokens et fichiers d’export
-        self.config_path = "./config"
-        if not os.path.exists(self.config_path):
-            os.makedirs(self.config_path)
-        
-        # Chemin complet vers le fichier token
-        self.token_path = os.path.join(self.config_path, "t_token")
-        
+        self.api_clid = 'b04da548cc9df60510eac7ec1845ab98cebd8008a9978804a981bff7e73ab270'
+        self.api_clsc = 'a880315fba01a5e5f0ad7de12b7872e36826a9359b2f419122a24dee1b2cb600'
         self.api_token = None
-        self.api_headers = { 'Content-Type': 'application/json' }
+        self.refresh_token = None
+        self.config_path = BASE_PATH
+        self.token_data_path = os.path.join(BASE_PATH, "t_token")
+        self.api_headers = {'Content-Type': 'application/json'}
 
     def authenticate(self):
-        if self.__decache_token():
+        if self.__load_token_from_cache():
+            if not self.__token_valid():
+                if not self.__refresh_token():
+                    print("⚠️ Unable to refresh the token, restarting authentication.")
+                    self.__delete_token_cache()
+                    return self.authenticate()
             return True
 
         dev_code_details = self.__generate_device_code()
         self.__show_auth_instructions(dev_code_details)
 
-        return self.__poll_for_auth(dev_code_details['device_code'],
-                                    dev_code_details['interval'],
-                                    dev_code_details['expires_in'] + time.time())
+        got_token = self.__poll_for_auth(dev_code_details['device_code'],
+                                         dev_code_details['interval'],
+                                         dev_code_details['expires_in'] + time.time())
 
-    def __decache_token(self):
-        if not os.path.isfile(self.token_path):
+        if got_token:
+            self.__save_token_to_cache()
+            return True
+
+        return False
+
+    def __load_token_from_cache(self):
+        if not os.path.isfile(self.token_data_path):
             return False
-
-        with open(self.token_path, 'r') as token_file:
-            token_data = json.load(token_file)
-
-        if time.time() > token_data.get('expires_at', 0):
-            return self.__refresh_token(token_data.get('refresh_token'))
-
-        self.api_token = token_data.get('access_token')
+        with open(self.token_data_path, 'r') as f:
+            data = json.load(f)
+            self.api_token = data.get('access_token')
+            self.refresh_token = data.get('refresh_token')
         return True
 
-    def __encache_token(self, token_data):
-        with open(self.token_path, 'w') as token_file:
-            json.dump(token_data, token_file)
+    def __save_token_to_cache(self):
+        with open(self.token_data_path, 'w') as f:
+            json.dump({
+                'access_token': self.api_token,
+                'refresh_token': self.refresh_token
+            }, f)
 
-    def __refresh_token(self, refresh_token):
+    def __delete_token_cache(self):
+        if os.path.exists(self.token_data_path):
+            os.remove(self.token_data_path)
+            print("🗑️ Token cache deleted")
+
+    def __refresh_token(self):
+        print("Refreshing token...")
         url = self.api_root + '/oauth/token'
         data = json.dumps({
-            "refresh_token": refresh_token,
+            "refresh_token": self.refresh_token,
             "client_id": self.api_clid,
             "client_secret": self.api_clsc,
+            "redirect_uri": "urn:ietf:wg:oauth:2.0:oob",
             "grant_type": "refresh_token"
         }).encode('utf8')
 
         request = Request(url, data, self.api_headers)
 
         try:
-            response = urlopen(request).read()
-            response_dict = json.loads(response)
-            self.api_token = response_dict['access_token']
-            self.__encache_token({
-                'access_token': response_dict['access_token'],
-                'refresh_token': response_dict['refresh_token'],
-                'expires_at': time.time() + response_dict['expires_in']
-            })
-            print("Access token refreshed successfully.")
+            response_body = urlopen(request).read()
+            response_data = json.loads(response_body)
+            self.api_token = response_data['access_token']
+            self.refresh_token = response_data['refresh_token']
+            self.__save_token_to_cache()
+            print("✅ Token successfully refreshed")
             return True
-        except HTTPError as err:
-            print(f"{err.code} : Token refresh failed.")
+        except (HTTPError, URLError) as e:
+            print(f"❌ Error while refreshing token: {e}")
             return False
 
-    @staticmethod
-    def __delete_token_cache(path):
-        if os.path.exists(path):
-            os.remove(path)
+    def __token_valid(self):
+        test_url = self.api_root + '/users/me'
+        headers = {
+            'Authorization': 'Bearer ' + self.api_token,
+            'trakt-api-version': '2',
+            'trakt-api-key': self.api_clid
+        }
+        request = Request(test_url, headers=headers)
+
+        try:
+            urlopen(request)
+            return True
+        except HTTPError:
+            return False
 
     def __generate_device_code(self):
         url = self.api_root + '/oauth/device/code'
         data = json.dumps({"client_id": self.api_clid}).encode('utf8')
-
         request = Request(url, data, self.api_headers)
         response_body = urlopen(request).read()
         return json.loads(response_body)
 
     @staticmethod
     def __show_auth_instructions(details):
-        print(f"""
-Go to {details['verification_url']} in your web browser and enter the code:
-
-{details['user_code']}
-
-After you've authenticated, return here to continue.
-""")
+        message = (f"\n👉 Go to {details['verification_url']} and enter the code: {details['user_code']}\n")
+        print(message)
 
     def __poll_for_auth(self, device_code, interval, expiry):
         url = self.api_root + '/oauth/device/token'
@@ -109,39 +123,21 @@ After you've authenticated, return here to continue.
             "client_id": self.api_clid,
             "client_secret": self.api_clsc
         }).encode('utf8')
-
         request = Request(url, data, self.api_headers)
 
-        print("Waiting for authorization", end='', flush=True)
-
-        while True:
+        while time.time() < expiry:
             time.sleep(interval)
-
             try:
                 response_body = urlopen(request).read()
-                break
+                response_data = json.loads(response_body)
+                self.api_token = response_data['access_token']
+                self.refresh_token = response_data['refresh_token']
+                print("✅ Authenticated!")
+                return True
             except HTTPError as err:
-                if err.code == 400:
-                    print(".", end='', flush=True)
-                else:
-                    print(f"\n{err.code}: Authorization failed. Script will exit.")
+                if err.code != 400:
+                    print(f"\n{err.code}: Authorization failed")
                     return False
-
-            if time.time() > expiry:
-                print("\nAuthorization timeout.")
-                return False
-
-        response_dict = json.loads(response_body)
-        if 'access_token' in response_dict:
-            self.api_token = response_dict['access_token']
-            self.__encache_token({
-                'access_token': response_dict['access_token'],
-                'refresh_token': response_dict['refresh_token'],
-                'expires_at': time.time() + response_dict['expires_in']
-            })
-            print("\nAuthenticated!")
-            return True
-
         return False
 
     def get_movie_list(self, list_name):
@@ -152,25 +148,24 @@ After you've authenticated, return here to continue.
             'trakt-api-version': '2',
             'trakt-api-key': self.api_clid
         }
-
         extracted_movies = []
-        page_limit = 1
         page = 1
         ratings = self.get_ratings()
 
-        while page <= page_limit:
-            request = Request(f"{self.api_root}/sync/{list_name}/movies?page={page}&limit=10", headers=headers)
+        while True:
+            request = Request(self.api_root + f'/sync/{list_name}/movies?page={page}&limit=100', headers=headers)
             try:
                 response = urlopen(request)
-                page_limit = int(response.info().get('X-Pagination-Page-Count', 1))
-                print(f"Completed page {page} of {page_limit}")
+                response_body = response.read()
+                movies = json.loads(response_body)
+                if not movies:
+                    break
+                extracted_movies.extend(self.__extract_fields(movies, ratings))
+                print(f"Completed page {page}")
                 page += 1
-                extracted_movies.extend(self.__extract_fields(json.loads(response.read()), ratings))
             except HTTPError as err:
-                if err.code in (401, 403):
-                    print("Auth token expired.")
-                    self.__delete_token_cache(self.token_path)
-                print(f"{err.code}: An error occurred. Please re-run the script.")
+                print(f"{err.code} error. Re-authentication required.")
+                self.__delete_token_cache()
                 quit()
 
         return extracted_movies
@@ -182,11 +177,10 @@ After you've authenticated, return here to continue.
             'trakt-api-version': '2',
             'trakt-api-key': self.api_clid
         }
-
         request = Request(self.api_root + '/sync/ratings/movies', headers=headers)
-
         try:
             response = urlopen(request)
+            response_body = response.read()
             return [
                 {
                     'rating': r['rating'],
@@ -194,59 +188,51 @@ After you've authenticated, return here to continue.
                     'trakt': r['movie']['ids']['trakt'],
                     'tmdb': r['movie']['ids']['tmdb'],
                     'slug': r['movie']['ids']['slug']
-                } for r in json.loads(response.read())
+                } for r in json.loads(response_body)
             ]
         except HTTPError as err:
-            if err.code in (401, 403):
-                print("Auth token expired.")
-                self.__delete_token_cache(self.token_path)
-            print(f"{err.code}: An error occurred. Please re-run the script.")
+            print(f"{err.code} error. Re-authentication required.")
+            self.__delete_token_cache()
             quit()
 
     @staticmethod
     def __get_rating(ratings, ids):
-        for r in ratings:
-            if ids['imdb'] == r['imdb'] or ids['trakt'] == r['trakt'] or ids['tmdb'] == r['tmdb'] or ids['slug'] == r['slug']:
-                return r['rating']
+        for rating in ratings:
+            if ids['imdb'] == rating['imdb'] or ids['trakt'] == rating['trakt'] or ids['tmdb'] == rating['tmdb'] or ids['slug'] == rating['slug']:
+                return rating['rating']
         return ''
 
     @staticmethod
     def __extract_fields(movies, ratings):
         return [{
-            'WatchedDate': m.get('watched_at', ''),
-            'tmdbID': m['movie']['ids']['tmdb'],
-            'imdbID': m['movie']['ids']['imdb'],
-            'Title': m['movie']['title'],
-            'Year': m['movie']['year'],
-            'Rating10': TraktImporter.__get_rating(ratings, m['movie']['ids'])
-        } for m in movies]
+            'WatchedDate': x['watched_at'] if 'watched_at' in x else '',
+            'tmdbID': x['movie']['ids']['tmdb'],
+            'imdbID': x['movie']['ids']['imdb'],
+            'Title': x['movie']['title'],
+            'Year': x['movie']['year'],
+            'Rating10': TraktImporter.__get_rating(ratings, x['movie']['ids'])
+        } for x in movies]
 
-def write_csv(rows, filename):
-    if rows:
-        with open(filename, 'w', encoding='utf8') as f:
-            writer = csv.DictWriter(f, list(rows[0].keys()))
+def write_csv(history, filename):
+    if history:
+        custom_path = os.path.join(BASE_PATH, filename)
+        with open(custom_path, 'w', encoding='utf8') as f:
+            writer = csv.DictWriter(f, list(history[0].keys()))
             writer.writeheader()
-            writer.writerows(rows)
+            writer.writerows(history)
         return True
     return False
 
 def run():
     print("Initializing...")
-
     importer = TraktImporter()
     if importer.authenticate():
         history = importer.get_movie_list('history')
         watchlist = importer.get_movie_list('watchlist')
-
         if write_csv(history, "trakt-exported-history.csv"):
-            print("✅ History exported to 'trakt-exported-history.csv'")
-        else:
-            print("⚠️ No history found.")
-
+            print("\n✅ Your history has been exported.")
         if write_csv(watchlist, "trakt-exported-watchlist.csv"):
-            print("✅ Watchlist exported to 'trakt-exported-watchlist.csv'")
-        else:
-            print("⚠️ No watchlist found.")
+            print("✅ Your watchlist has been exported.")
 
 if __name__ == '__main__':
     run()
