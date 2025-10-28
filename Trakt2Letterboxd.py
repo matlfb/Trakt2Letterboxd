@@ -25,9 +25,8 @@ class TraktImporter:
         if self.__load_token_from_cache():
             if not self.__token_valid():
                 if not self.__refresh_token():
-                    print("⚠️ Unable to refresh the token, restarting authentication.")
-                    self.__delete_token_cache()
-                    return self.authenticate()
+                    print("⚠️ Unable to refresh the token, manual re-authentication may be required.")
+                    return False
             return True
 
         dev_code_details = self.__generate_device_code()
@@ -58,11 +57,6 @@ class TraktImporter:
                 'access_token': self.api_token,
                 'refresh_token': self.refresh_token
             }, f)
-
-    def __delete_token_cache(self):
-        if os.path.exists(self.token_data_path):
-            os.remove(self.token_data_path)
-            print("🗑️ Token cache deleted")
 
     def __refresh_token(self):
         print("Refreshing token...")
@@ -141,7 +135,6 @@ class TraktImporter:
         return False
 
     def get_comments(self):
-        """Récupère tous les commentaires (reviews) de l'utilisateur"""
         print("Getting comments/reviews...")
         headers = {
             'Content-Type': 'application/json',
@@ -162,29 +155,22 @@ class TraktImporter:
                 response = urlopen(request)
                 response_body = response.read()
                 comments = json.loads(response_body)
-                
                 if not comments:
                     break
                 
                 for item in comments:
-                    # item contient 'type', 'movie', et 'comment'
-                    # mais 'comment' est lui-même un objet avec un champ 'comment' à l'intérieur !
                     if 'movie' in item and 'comment' in item:
                         movie_ids = item['movie']['ids']
-                        
-                        # Si 'comment' est un dict, on prend le champ 'comment' dedans
                         if isinstance(item['comment'], dict):
                             comment_text = item['comment'].get('comment', '')
                             spoiler = item['comment'].get('spoiler', False)
                         else:
-                            # Si c'est déjà une string
                             comment_text = item['comment']
                             spoiler = item.get('spoiler', False)
                         
                         if spoiler:
                             comment_text = "[SPOILER] " + comment_text
                         
-                        # Utiliser tmdb comme clé principale
                         key = movie_ids.get('tmdb')
                         if key:
                             comments_dict[key] = comment_text
@@ -226,8 +212,7 @@ class TraktImporter:
                 print(f"Completed page {page}")
                 page += 1
             except HTTPError as err:
-                print(f"{err.code} error. Re-authentication required.")
-                self.__delete_token_cache()
+                print(f"{err.code} error while fetching {list_name}. Try re-authenticating manually.")
                 quit()
 
         return extracted_movies
@@ -253,8 +238,7 @@ class TraktImporter:
                 } for r in json.loads(response_body)
             ]
         except HTTPError as err:
-            print(f"{err.code} error. Re-authentication required.")
-            self.__delete_token_cache()
+            print(f"{err.code} error while fetching ratings. Try re-authenticating manually.")
             quit()
 
     @staticmethod
@@ -266,7 +250,6 @@ class TraktImporter:
 
     @staticmethod
     def __get_comment(comments_dict, ids):
-        """Récupère le commentaire associé à un film"""
         tmdb_id = ids.get('tmdb')
         if tmdb_id and tmdb_id in comments_dict:
             return comments_dict[tmdb_id]
@@ -284,6 +267,7 @@ class TraktImporter:
             'Review': TraktImporter.__get_comment(comments, x['movie']['ids'])
         } for x in movies]
 
+
 def write_csv(history, filename):
     if history:
         custom_path = os.path.join(BASE_PATH, filename)
@@ -293,6 +277,7 @@ def write_csv(history, filename):
             writer.writerows(history)
         return True
     return False
+
 
 def run():
     print("Initializing...")
@@ -304,6 +289,7 @@ def run():
             print("\n✅ Your history has been exported.")
         if write_csv(watchlist, "trakt-exported-watchlist.csv"):
             print("✅ Your watchlist has been exported.")
+
 
 if __name__ == '__main__':
     run()
