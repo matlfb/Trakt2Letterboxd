@@ -285,8 +285,18 @@ def run():
     if importer.authenticate():
         history = importer.get_movie_list('history')
         watchlist = importer.get_movie_list('watchlist')
+
+        # Export complet
         if write_csv(history, "trakt-exported-history.csv"):
-            print("\n✅ Your history has been exported.")
+            print("\n✅ Your full history has been exported.")
+
+        # Export des 50 derniers films vus
+        if history:
+            last_50 = history[:50]  # les 50 plus récents
+            if write_csv(last_50, "trakt-exported-history-last50.csv"):
+                print("✅ The last 50 movies have been exported.")
+
+        # Export watchlist
         if write_csv(watchlist, "trakt-exported-watchlist.csv"):
             print("✅ Your watchlist has been exported.")
 
